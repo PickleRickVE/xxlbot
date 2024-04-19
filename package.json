@@ -1,0 +1,14 @@
+{
+  "name": "xxlbot",
+  "version": "0.1.0",
+  "description": "Bot for posting xxl Pokémon for showcases",
+  "main": "app.js",
+  "scripts": {
+    "run": "node app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "PickleRickVE",
+  "dependencies": {
+    "axios": "^0.24.0"
+  }
+}

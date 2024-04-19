@@ -1,0 +1,23 @@
+const botToken = '123456:Abcdefghijklmnopqrstuvwxyz';
+const channelID = "1234567890";
+const lang = 'german'; // german, english
+const tileServer = 'https://tiles.xy.com'
+const logFile = './logs/xxlbot.log';
+const srv = {
+    host: '0.0.0.0',  // better change to '127.0.0.1' if on the same host
+    port: 9999
+}
+const filter = {
+    minWv: 0,  // 'Quality' of weight/height ratio (>0.25 ~ >95%)
+    minScore: 1000  // minimal final score for every individual values (relevant only for 1.75 class)
+}
+
+module.exports = {
+	botToken,
+	channelID,
+    lang,
+    tileServer,
+	logFile,
+    srv,
+    filter
+}
