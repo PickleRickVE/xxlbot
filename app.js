@@ -252,7 +252,7 @@ postTg = (obj) => {
         chat_id: config.channelID, 
         parse_mode: 'markdown', 
         disable_web_page_preview: false, 
-        text: msg + '[​](' + config.tileServer + '/staticmap/pokemon?id=' + obj.id + '&lat=' + obj.lat + '&lon=' + obj.lon + ')\n' + '[📍 Google Maps](https://www.google.com/maps/@' + obj.lat + ',' + obj.lon + ',17z)'
+        text: msg + '[​](' + config.tileServer + '/staticmap/pokemon?id=' + obj.id + '&lat=' + obj.lat + '&lon=' + obj.lon + ')\n' + '[📍 Google Maps](https://maps.google.com/maps?&z=17&q=' + obj.lat + '+' + obj.lon + '&ll=' + obj.lat + '+' + obj.lon + ')'
     })
     .then(response => {
         if (response.status == 200) {
