@@ -2,7 +2,7 @@
 const axios = require('axios');
 const fs = require('fs');
 const http = require('http');
-const mon = require('./mon').mon;
+const fetch = require('node-fetch');
 const tl = require('./lang').tl;
 
 // config
@@ -19,6 +19,14 @@ switch (config.lang) {
         lang = tl[1];
         break;
 }
+
+var master;
+fetch('https://raw.githubusercontent.com/WatWowMap/Masterfile-Generator/master/master-latest-raw.json', {method: "Get"})
+    .then(res => res.json())
+    .then((json) => {
+        master = json.pokemon;
+        forms = json.forms;
+    });
 
 // webhook listener
 const server = http.createServer((req, res) => {
@@ -49,24 +57,53 @@ server.listen(config.srv.port, config.srv.host, () => {
 // webhook parser
 parseWebhook = async (values) => {
     for await (const element of values) {
-        if (element.message.pokemon_id != undefined && element.message.size == 5 && (mon[element.message.pokemon_id].xxclass == 1.55 || mon[element.message.pokemon_id].xxclass == 1.75)) {  
-            let evo = mon[element.message.pokemon_id].diffEvo != undefined ? mon[element.message.pokemon_id].diffEvo : 0;
-            let pokemon = {
-                id: element.message.pokemon_id,
-                form: element.message.form,
-                atk: element.message.individual_attack,
-                def: element.message.individual_defense,
-                sta: element.message.individual_stamina,
-                lat: element.message.latitude,
-                lon: element.message.longitude,
-                weight: element.message.weight,
-                height: element.message.height,
-                cp: element.message.cp,
-                time: element.message.disappear_time,
-                verified: element.message.disappear_time_verified,
-                evo: evo
-            };
-            processMon(pokemon);
+        if (element.message.pokemon_id != undefined && element.message.size == 5) {
+            let exIds = [133, 710, 711]; // excluded mon
+            let xc = parseFloat((master[element.message.pokemon_id].sizeSettings[5].value/master[element.message.pokemon_id].height).toFixed(2));
+            var evoId = 0;
+            var evoXc = 0;
+            if (!exIds.includes(element.message.pokemon_id) && master[element.message.pokemon_id].evolutions != undefined) {
+                for await (const a of master[element.message.pokemon_id].evolutions) {
+                    let evo1Id = a.evoId;
+                    let xc1 = parseFloat((master[evo1Id].sizeSettings[5].value/master[evo1Id].height).toFixed(2));
+                    if (xc > xc1) {
+                        evoId = evo1Id;
+                        evoXc = xc1;
+                    }
+                    if (master[evo1Id].evolutions != undefined) {
+                        for await (const b of master[evo1Id].evolutions) {
+                            let evo2Id = b.evoId;
+                            let xc2 = parseFloat((master[evo2Id].sizeSettings[5].value/master[evo2Id].height).toFixed(2));
+                            if (xc > xc2) {
+                                evoId = evo2Id;
+                                evoXc = xc2;
+                            }
+                        }
+                    }
+                }
+            }
+            if (xc < 2 || evoXc < 2 || element.message.pokemon_id == 133) { // Evoli evolutions all have 1.55 xxclass
+                let pokemon = {
+                    id: element.message.pokemon_id,
+                    form: element.message.form,
+                    atk: element.message.individual_attack,
+                    def: element.message.individual_defense,
+                    sta: element.message.individual_stamina,
+                    lat: element.message.latitude,
+                    lon: element.message.longitude,
+                    weight: element.message.weight,
+                    height: element.message.height,
+                    cp: element.message.cp,
+                    xc: xc,
+                    time: element.message.disappear_time,
+                    verified: element.message.disappear_time_verified,
+                    evo: {
+                        id: evoId,
+                        xc: evoXc
+                    }
+                };
+                processMon(pokemon);
+            }
         }
     }
 }
@@ -79,44 +116,44 @@ processMon = (pokemon) => {
         height: pokemon.height,
         ivSum: (pokemon.atk + pokemon.def + pokemon.sta)
     }
-    // additional calculation for 1,55 evolutions
+    // additional calculation for evolutions
     let evoString = '';
     let evoMinScore = 0;
     let evoMaxScore = 0;
-    if (pokemon.evo != 0) {
+    if (pokemon.evo.id != 0) {
         if (pokemon.form != 0) {
-            var data1 = getForm(pokemon.form, pokemon.evo);
+            var data1 = getForm(pokemon.form, pokemon.evo.id);
         } else {
             var data1 = {
-                avgWeight: mon[pokemon.evo].avgWeight,
-                avgHeight: mon[pokemon.evo].avgHeight,
-                xc: mon[pokemon.evo].xxclass,
+                avgWeight: master[pokemon.evo.id].weight,
+                avgHeight: master[pokemon.evo.id].height,
+                xc: pokemon.evo.xc,
                 form: ''
             }
         }
         let result = calculate(data1, data2);
         evoMinScore = result.minScore.toFixed();
         evoMaxScore = result.maxScore.toFixed();
-        evoString = ', ' + lang.evo + ' ' + lang.mon[pokemon.evo-1] + ': ' + result.minScore.toFixed() + '-' + result.maxScore.toFixed()
+        evoString = `, ${lang.evo} ${lang.mon[pokemon.evo.id - 1]}: ${result.minScore.toFixed()}-${result.maxScore.toFixed()}`
     }
-    // get data from master for the right form and calculate
+    // get data from master and calculate
     if (pokemon.form != 0) {
         var data1 = getForm(pokemon.form, pokemon.id);
         var result = calculate(data1, data2)
     } else {
         var data1 = {
-            avgWeight: mon[pokemon.id].avgWeight,
-            avgHeight: mon[pokemon.id].avgHeight,
-            xc: mon[pokemon.id].xxclass,
+            avgWeight: master[pokemon.id].weight,
+            avgHeight: master[pokemon.id].height,
+            xc: pokemon.xc,
             form: ''
         }
         var result = calculate(data1, data2)
     }
     let time = getTime(pokemon.time*1000)
-    if ((result.minScore >= config.filter.minScore && result.wv >= config.filter.minWv) || (pokemon.evo != 0 && result.wv >= config.filter.minWv)) {
+    if ((result.minScore >= config.filter.minScore && result.wv >= config.filter.minWv) || (pokemon.evo.id != 0 && evoMinScore >= config.filter.minScore && result.wv >= config.filter.minWv)) {
         let obj = {
             id: pokemon.id,
-            evo: pokemon.evo,
+            evo: pokemon.evo.id,
             form: data1.form,
             lat: pokemon.lat,
             lon: pokemon.lon,
@@ -132,87 +169,28 @@ processMon = (pokemon) => {
         postTg(obj);
     }
     let logTime = getTime();
-    logMsg = '[' + logTime + '] ' + data1.form + lang.mon[pokemon.id-1] + ' | variate: ' + result.wv.toFixed(2) + ' | iv: ' + (data2.ivSum/45*100).toFixed() + '%' + ' | range: ' + result.minScore.toFixed() + '-' + result.maxScore.toFixed() + evoString;
+    logMsg = `[${logTime}] ${data1.form}${lang.mon[pokemon.id - 1]} | variate: ${result.wv.toFixed(2)} | iv: ${(data2.ivSum / 45 * 100).toFixed()}% | range: ${result.minScore.toFixed()}-${result.maxScore.toFixed()}${evoString}`;
     console.log(logMsg)
-    fs.writeFile(config.logFile, logMsg + '\n', {flag: 'a'}, error => {if (error) {console.log(error)}});
+    fs.writeFile(config.logFile, `${logMsg}\n`, {flag: 'a'}, error => {if (error) {console.log(error)}});
 }
 
 // identify form of mon
 getForm = (form, id) => {
     var data1 = {};
-    switch (form) {
-        case 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80:
-            data1 = {
-                avgWeight: mon[id].alola.avgWeight,
-                avgHeight: mon[id].alola.avgHeight,
-                xc: mon[id].alola.xxclass,
-                form: 'alola '
-            }
-            break;
-        case 2728, 2735, 2785, 2786, 2787, 2788, 2789, 2790, 2791, 2792, 2793, 2794, 2795, 2796, 2797, 2798:
-            data1 = {
-                avgWeight: mon[id].hisuian.avgWeight,
-                avgHeight: mon[id].hisuian.avgHeight,
-                xc: mon[id].hisuian.xxclass,
-                form: 'hisuian '
-            }
-            break;
-        case 944, 946, 948, 2335, 2336, 2337, 2338, 2339, 2340, 2341, 2342, 2343, 2344, 2345, 2582, 2583, 2584, 2799, 2800, 2801:
-            data1 = {
-                avgWeight: mon[id].galarian.avgWeight,
-                avgHeight: mon[id].galarian.avgHeight,
-                xc: mon[id].galarian.xxclass,
-                form: 'galarian '
-            }
-            break;
-        case 3009:
-            data1 = {
-                avgWeight: mon[id].paldea.avgWeight,
-                avgHeight: mon[id].paldea.avgHeight,
-                xc: mon[id].paldea.xxclass,
-                form: 'paldea '
-            }
-            break;
-        case 2641, 2645:
-            data1 = {
-                avgWeight: mon[id].small.avgWeight,
-                avgHeight: mon[id].small.avgHeight,
-                xc: mon[id].small.xxclass,
-                form: 'small '
-            }
-            break;
-        case 2642, 2646:
-            data1 = {
-                avgWeight: mon[id].average.avgWeight,
-                avgHeight: mon[id].average.avgHeight,
-                xc: mon[id].average.xxclass,
-                form: 'average '
-            }
-            break;
-        case 2643, 2647:
-            data1 = {
-                avgWeight: mon[id].large.avgWeight,
-                avgHeight: mon[id].large.avgHeight,
-                xc: mon[id].large.xxclass,
-                form: 'large '
-            }
-            break;
-        case 2644, 2648:
-            data1 = {
-                avgWeight: mon[id].super.avgWeight,
-                avgHeight: mon[id].super.avgHeight,
-                xc: mon[id].super.xxclass,
-                form: 'super '
-            }
-            break;
-        default:
-            data1 = {
-                avgWeight: mon[id].avgWeight,
-                avgHeight: mon[id].avgHeight,
-                xc: mon[id].xxclass,
-                form: ''
-            }
-            break;
+    if (forms[form].formName != 'Normal') {
+        data1 = {
+            avgWeight: forms[form].weight != undefined ? forms[form].weight : master[id].weight,
+            avgHeight: forms[form].height != undefined ? forms[form].height : master[id].height,
+            xc: forms[form].sizeSettings != undefined ? parseFloat((forms[form].sizeSettings[5].value/forms[form].height).toFixed(2)) : parseFloat((master[id].sizeSettings[5].value/master[id].height).toFixed(2)),
+            form: `${forms[form].formName} `
+        }
+    } else {
+        data1 = {
+            avgWeight: master[id].weight,
+            avgHeight: master[id].height,
+            xc: parseFloat((master[id].sizeSettings[5].value/master[id].height).toFixed(2)),
+            form: ''
+        }
     }
     return data1;
 }
@@ -246,13 +224,13 @@ getTime = (time) => {
 var tgMsgs = []; // array to store telegram messages for deletion on expiration
 postTg = (obj) => {
     let verified = obj.verified == true ? '\u2705' : '';
-    let evo = obj.evo != 0 ? "\n" + lang.evo + " *" + lang.mon[obj.evo-1] + "* " + obj.evoMinScore + "-" + obj.evoMaxScore : "";
-    let msg = "*" + obj.form + lang.mon[obj.id-1] + "* (" + obj.cp + lang.cp + "), score " + obj.minScore.toFixed() + "-" + obj.maxScore.toFixed() + evo + "\n" + lang.avl + " " + obj.timeString + lang.clk  + " " + verified;
-    axios.post('https://api.telegram.org/bot' + config.botToken + '/sendMessage', { 
+    let evo = obj.evo != 0 ? `\n${lang.evo} *${lang.mon[obj.evo - 1]}* ${obj.evoMinScore}-${obj.evoMaxScore}` : "";
+    let msg = `*${obj.form}${lang.mon[obj.id - 1]}* (${obj.cp}${lang.cp}), score ${obj.minScore.toFixed()}-${obj.maxScore.toFixed()}${evo}\n${lang.avl} ${obj.timeString}${lang.clk} ${verified}`;
+    axios.post(`https://api.telegram.org/bot${config.botToken}/sendMessage`, { 
         chat_id: config.channelID, 
         parse_mode: 'markdown', 
         disable_web_page_preview: false, 
-        text: msg + '[​](' + config.tileServer + '/staticmap/pokemon?id=' + obj.id + '&lat=' + obj.lat + '&lon=' + obj.lon + ')\n' + '[📍 Google Maps](https://maps.google.com/maps?&z=17&q=' + obj.lat + '+' + obj.lon + '&ll=' + obj.lat + '+' + obj.lon + ')'
+        text: `${msg}[​](${config.tileServer}/staticmap/pokemon?id=${obj.id}&lat=${obj.lat}&lon=${obj.lon})\n[📍 Google Maps](https://maps.google.com/maps?&z=17&q=${obj.lat}+${obj.lon}&ll=${obj.lat}+${obj.lon})`
     })
     .then(response => {
         if (response.status == 200) {
@@ -264,8 +242,8 @@ postTg = (obj) => {
         }
         tgMsgs.push(msg)
         let logTime = getTime();
-        let logEvo = obj.evo != 0 ? " / " + lang.mon[obj.evo-1] : "";
-        let logMsg = '[' + logTime + '] pushed ' + obj.form + lang.mon[obj.id-1] + logEvo + ' to telegram';
+        let logEvo = obj.evo != 0 ? ` / ${lang.mon[obj.evo - 1]}` : "";
+        let logMsg = `[${logTime}] pushed ${obj.form}${lang.mon[obj.id - 1]}${logEvo} to telegram`;
         console.log(logMsg)
         fs.writeFile(config.logFile, logMsg + '\n', {flag: 'a'}, error => {if (error) {console.log(error)}});
     })
@@ -285,7 +263,7 @@ postTg = (obj) => {
 
 delTg = async (id, monId) => {
     var result;
-    await axios.post('https://api.telegram.org/bot' + config.botToken + '/deleteMessage', { 
+    await axios.post(`https://api.telegram.org/bot${config.botToken}/deleteMessage`, { 
         chat_id: config.channelID, 
         message_id: id
     })
@@ -294,13 +272,13 @@ delTg = async (id, monId) => {
             result = true;
         }
         let logTime = getTime();
-        let logMsg = '[' + logTime + '] deleted msg #' + id + " with " + lang.mon[monId-1] + ' on telegram';
+        let logMsg = `[${logTime}] deleted msg #${id} with ${lang.mon[monId - 1]} on telegram`;
         console.log(logMsg)
         fs.writeFile(config.logFile, logMsg + '\n', {flag: 'a'}, error => {if (error) {console.log(error)}});
     })
     .catch(error => {
         let logTime = getTime();
-        let logMsg = '[' + logTime + '] failed to delete msg #' + id + " with " + lang.mon[monId-1] + ' on telegram';
+        let logMsg = `[${logTime}] failed to delete msg #${id} with ${lang.mon[monId - 1]} on telegram`;
         console.log(logMsg)
         fs.writeFile(config.logFile, logMsg + '\n', {flag: 'a'}, error => {if (error) {console.log(error)}});
         result = false;
